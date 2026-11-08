@@ -1,4 +1,4 @@
-# Create-ESXi-ISO-files-using-WSL-
+# Create-ESXi-ISO-files-using-WSL
 Creates ESXi ISO files using WSL + genisoimage.
 
 This script is intened for Windows users that want to create a customized ESXi iso image with automatic configuration using a kickstart file. Windows Subsystem for Linux (WSL) is going to be used on the Windows machine to create the iso image using genisoimage in WSL.
