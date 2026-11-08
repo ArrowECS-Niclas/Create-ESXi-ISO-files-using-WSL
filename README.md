@@ -13,7 +13,7 @@ http://webserver/kickstart/ESXi02/KS.CFG
 http://webserver/kickstart/ESXi03/KS.CFG  
 
 If $MediaType is set to http the script will change **boot.cfg** and **efi/boot/boot.cfg** to read the kickstart file from the web server by updating  
-`kernelopt=ks=http://webserver/kickstart/hostname/KS.CFG`  
+`kernelopt=ks=http://webserver/kickstart/hostname/KS.CFG` and it will be read during installation.  
 But if $MediaType is set to either USB or CD the script will copy the **KS.CFG** file to the $BinariesDir and change **boot.cfg** and **efi/boot/boot.cfg** to use a local kickstart file:
 `kernelopt=ks=cdrom:/KS.CFG`  
 `kernelopt=ks=usb:/KS.CFG`  
