@@ -7,10 +7,10 @@ The kickstart file (KS.CFG) for each host will be available on a web server with
 
 The iso file generated will be named using the host name and append the version of the source ESXi iso image by extracting the build label from the file **boot.cfg**, i.e ESX01-9.1.1-0.25714478.iso, ESX02-9.1.1-0.25714478.iso, ESX03-9.1.1-0.25714478.iso and so on.
 
-
-Variable             Description\
-$BinariesDir         Working directory containing the ESXi files\
-$IsoOutDir           Destination folder for the finished ISO files\
-$KickstartBaseUrl    Base URL used when MediaType = http\
-$MediaType           Installation method (http, USB, or CD)\
-$HostConfigDir       List of hosts to generate ISOs for\
+| Variable          | Description                                   |
+| ----------------- | --------------------------------------------- |
+| $BinariesDir      | Working directory containing the ESXi files   |
+| $IsoOutDir        | Destination folder for the finished ISO files |
+| $KickstartBaseUrl | Base URL used when MediaType = http           |
+| $MediaType        | Installation method (http, USB, or CD)        |
+| $HostConfigDir    | List of hosts to generate ISOs for            |
