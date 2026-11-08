@@ -1,9 +1,9 @@
 # Create-ESXi-ISO-files-using-WSL
-Creates ESXi ISO files using WSL + genisoimage.
+Creates ESXi ISO files using WSL + genisoimage and includes kickstart files for automatic configuration.
 
 This script is intened for Windows users that want to create a customized ESXi iso image with automatic configuration using a kickstart file. Windows Subsystem for Linux (WSL) is going to be used on the Windows machine to create the iso image using genisoimage in WSL.
 
-The script will create a bootable image from the files located in the $BinariesDir folder, if that folder is empty it will as for a path to an existing esxi iso image on your local drive, mount the image and copy the files to the $BinariesDir folder.
+The script will create a bootable image from the files located in the $BinariesDir folder, if that folder is empty it will ask for a path to an existing esxi iso image on your local drive, mount the image and copy the files to the $BinariesDir folder.
 
 ## How to use
 The kickstart file (KS.CFG) for each host should be available on a web server with a folder name corresponding to the host name, **http://webserver/kickstart/hostname/KS.CFG**  
