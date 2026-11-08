@@ -5,7 +5,8 @@ This script is intened for Windows users that want to create a customized ESXi i
 
 The script will create a bootable image from the files located in the $BinariesDir folder, if that folder is empty it will as for a path to an existing esxi iso image on your local drive, mount the image and copy the files to the $BinariesDir folder.
 
-The kickstart file (KS.CFG) for each host will be available on a web server with a folder name corresponding to the host name, **http://webserver/kickstart/hostname/KS.CFG**  
+## How to use
+The kickstart file (KS.CFG) for each host should be available on a web server with a folder name corresponding to the host name, **http://webserver/kickstart/hostname/KS.CFG**  
 For example  
 http://webserver/kickstart/ESXi01/KS.CFG  
 http://webserver/kickstart/ESXi02/KS.CFG  
@@ -23,6 +24,6 @@ The iso file generated will be named using the host name and append the version 
 | ----------------- | --------------------------------------------- |
 | $BinariesDir      | Working directory containing the ESXi files   |
 | $IsoOutDir        | Destination folder for the finished ISO files |
-| $KickstartBaseUrl | Base URL used when MediaType = http           |
+| $KickstartBaseUrl | Base URL used for kickstartfiles              |
 | $MediaType        | Installation method (http, USB, or CD)        |
 | $HostConfigDir    | List of hosts to generate ISOs for            |
