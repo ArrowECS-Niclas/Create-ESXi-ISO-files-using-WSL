@@ -1,32 +1,42 @@
 #Requires -Version 5.1
 <#
 .SYNOPSIS
-    Creates ESXi ISO files using WSL + genisoimage.
-    Version is automatically read from the "build" variable in boot.cfg / BOOT.CFG.
-    Updates kernelopt in boot.cfg and efi\boot\boot.cfg per host.
-    Supports install media: http | USB | CD
-    Can import files from an existing ESXi ISO if BinariesDir is empty.
+    Create-EsxiIsos.ps1
+    Creates per-host ESXi ISO files with Kickstart support (http / USB / CD).
+    Uses WSL + genisoimage.
+    All folders are located under a single Root directory.
+    Automatically uses the newest VMware-VMvisor-installer ISO from the Depot folder.
 #>
 
 # ============================================================
 # Configuration
 # ============================================================
-$BinariesDir      = "C:\ESXi91"
-$IsoOutDir        = "C:\ISO_images"
-$WslDistro        = "Ubuntu"
-$WslUserHome      = "/home/nibo"
 
-# Kickstart base URL
+# Root folder - change only this if you move the project
+$RootDir = "C:\ESXi"
+
+# Subfolders under $RootDir
+$DepotDir    = Join-Path $RootDir "Depot"      # Place original VMware-VMvisor-installer*.iso here
+$BinariesDir = Join-Path $RootDir "Binaries"   # Extracted ESXi files (working directory)
+$IsoOutDir   = Join-Path $RootDir "ISO"        # Finished ISO files
+
+# WSL settings
+$WslDistro   = "Ubuntu"
+$WslUserHome = "/home/nibo"
+
+# Kickstart base URL (used when MediaType = http)
 $KickstartBaseUrl = "http://192.168.0.76/kickstart/"
 
-# Select install media: "http", "USB" or "CD"
-$MediaType        = "http"
+# Install media type: "http", "USB" or "CD"
+$MediaType = "http"
 
-$HostConfigDir    = @("ESX01", "ESX02", "ESX03")
+# Hosts to create ISOs for
+$HostConfigDir = @("ESX01", "ESX02", "ESX03")
 
 # ============================================================
 # Helper functions
 # ============================================================
+
 function Write-Step {
     param([string]$Message)
     Write-Host "`n=== $Message ===" -ForegroundColor Cyan
@@ -55,39 +65,26 @@ function Get-WslPath {
 }
 
 function Test-WslAvailable {
-    # Check if wsl.exe exists
     try {
         $null = Get-Command wsl -ErrorAction Stop
     }
     catch {
-        throw "WSL (Windows Subsystem for Linux) is not installed or not available in PATH.`nInstall it with: wsl --install"
+        throw "WSL is not installed or not available in PATH. Install it with: wsl --install"
     }
 
-    # Check if the specified distribution exists
     $distros = wsl -l -q 2>$null
-    if (-not $distros) {
-        throw "No WSL distributions found. Install one with: wsl --install -d $WslDistro"
-    }
-
     $distroFound = $false
     foreach ($d in $distros) {
-        if ($d.Trim() -eq $WslDistro) {
-            $distroFound = $true
-            break
-        }
+        if ($d.Trim() -eq $WslDistro) { $distroFound = $true; break }
     }
-
     if (-not $distroFound) {
-        $available = ($distros | ForEach-Object { $_.Trim() }) -join ", "
-        throw "WSL distribution '$WslDistro' was not found.`nAvailable distributions: $available"
+        throw "WSL distribution '$WslDistro' was not found."
     }
 
-    # Quick test that the distro can actually start
     $test = wsl -d $WslDistro -- echo OK 2>$null
     if ($test -ne "OK") {
-        throw "WSL distribution '$WslDistro' exists but failed to start. Try running: wsl -d $WslDistro"
+        throw "WSL distribution '$WslDistro' failed to start."
     }
-
     Write-Host "WSL distribution '$WslDistro' is available." -ForegroundColor Green
 }
 
@@ -104,17 +101,51 @@ function Find-BootFile {
     return $null
 }
 
-function Import-FromEsxiIso {
-    param([string]$BinariesDir)
+function Get-NewestInstallerIso {
+    param([string]$DepotDir)
 
-    Write-Host ""
-    $answer = Read-Host "BinariesDir is empty. Do you want to import files from an existing ESXi ISO? (Y/N)"
-    if ($answer -notmatch '^[Yy]') {
-        throw "BinariesDir is empty and import was declined. Aborting."
+    $candidates = Get-ChildItem -Path $DepotDir -File -ErrorAction SilentlyContinue |
+                  Where-Object {
+                      $_.Name -match '^VMware-VMvisor-installer.*\.iso$' -or
+                      $_.Name -match '^VMware-ESXi.*\.iso$'
+                  }
+
+    if (-not $candidates -or $candidates.Count -eq 0) {
+        return $null
     }
 
-    $isoPath = Read-Host "Enter full path to the ESXi ISO file"
-    $isoPath = $isoPath.Trim().Trim('"')
+    # Sort by LastWriteTime descending and take the newest
+    $newest = $candidates | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+
+    $sizeGB = [math]::Round($newest.Length / 1GB, 2)
+    Write-Host "Automatically selected newest installer ISO:" -ForegroundColor Green
+    Write-Host "  File : $($newest.Name)"
+    Write-Host "  Size : $sizeGB GB"
+    Write-Host "  Date : $($newest.LastWriteTime)"
+
+    return $newest.FullName
+}
+
+function Import-FromEsxiIso {
+    param(
+        [string]$BinariesDir,
+        [string]$DepotDir
+    )
+
+    # Automatically pick the newest ISO from Depot
+    $isoPath = Get-NewestInstallerIso -DepotDir $DepotDir
+
+    # Fallback: ask user for path if nothing was found
+    if (-not $isoPath) {
+        Write-Host ""
+        $answer = Read-Host "No VMware-VMvisor-installer / VMware-ESXi ISO found in Depot. Specify an ISO manually? (Y/N)"
+        if ($answer -notmatch '^[Yy]') {
+            throw "Binaries folder is empty and no ISO was found. Aborting."
+        }
+
+        $isoPath = Read-Host "Enter full path to the ESXi ISO file"
+        $isoPath = $isoPath.Trim().Trim('"')
+    }
 
     if (-not (Test-Path $isoPath)) {
         throw "ISO file not found: $isoPath"
@@ -133,10 +164,9 @@ function Import-FromEsxiIso {
     Write-Host "ISO mounted as $sourcePath"
 
     try {
-        Write-Host "Copying files from $sourcePath to $BinariesDir ..."
+        Write-Host "Copying files to $BinariesDir ..."
         $robocopyArgs = @(
-            $sourcePath,
-            $BinariesDir,
+            $sourcePath, $BinariesDir,
             "/E", "/IS", "/IT",
             "/R:2", "/W:3",
             "/NFL", "/NDL", "/NJH", "/NJS", "/NC", "/NS"
@@ -147,12 +177,13 @@ function Import-FromEsxiIso {
             throw "Robocopy failed with exit code $LASTEXITCODE"
         }
 
-        # Clear Read-only attribute on all copied files
-        Write-Host "Clearing Read-only attributes..."
+        # Clear Read-only attributes
         Get-ChildItem -Path $BinariesDir -Recurse -Force -ErrorAction SilentlyContinue |
-            ForEach-Object { $_.Attributes = $_.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly) }
+            ForEach-Object {
+                try { $_.Attributes = $_.Attributes -band (-bnot [System.IO.FileAttributes]::ReadOnly) } catch {}
+            }
 
-        Write-Host "Files successfully copied to $BinariesDir" -ForegroundColor Green
+        Write-Host "Files successfully copied." -ForegroundColor Green
     }
     finally {
         Write-Host "Dismounting ISO..."
@@ -165,12 +196,10 @@ function Get-VersionFromBootCfg {
 
     $bootCfgFile = Get-ChildItem -Path $BinariesDir -Filter "boot.cfg" -File -ErrorAction SilentlyContinue |
                    Select-Object -First 1
-
     if (-not $bootCfgFile) {
         $bootCfgFile = Get-ChildItem -Path $BinariesDir -Filter "BOOT.CFG" -File -ErrorAction SilentlyContinue |
                        Select-Object -First 1
     }
-
     if (-not $bootCfgFile) {
         throw "Neither boot.cfg nor BOOT.CFG found in $BinariesDir"
     }
@@ -186,13 +215,11 @@ function Get-VersionFromBootCfg {
     }
 
     $version = ($buildLine -split '=', 2)[1].Trim()
-
     if ([string]::IsNullOrWhiteSpace($version)) {
-        throw "build value is empty in $($bootCfgFile.FullName)"
+        throw "build value is empty"
     }
 
     $version = $version -replace '[\\/:*?"<>|]', '_'
-
     Write-Host "Found build/version: $version" -ForegroundColor Green
     return $version
 }
@@ -216,7 +243,7 @@ function Update-KernelOpt {
             $newKernelOpt = "kernelopt=ks=cdrom:/KS.CFG"
         }
         default {
-            throw "Invalid value for MediaType: '$MediaType'. Allowed values: http, USB, CD"
+            throw "Invalid MediaType: '$MediaType'. Allowed values: http, USB, CD"
         }
     }
 
@@ -231,13 +258,10 @@ function Update-KernelOpt {
             continue
         }
 
-        # Clear Read-only attribute before writing
         $item = Get-Item $file -Force
-        if ($item.IsReadOnly) {
-            $item.IsReadOnly = $false
-        }
+        if ($item.IsReadOnly) { $item.IsReadOnly = $false }
 
-        Write-Host "Updating kernelopt in $file → $newKernelOpt"
+        Write-Host "Updating kernelopt in $file -> $newKernelOpt"
 
         $content = Get-Content $file -Raw -ErrorAction Stop
 
@@ -262,7 +286,7 @@ function Copy-KickstartFile {
     $sourceUrl  = "$KickstartBaseUrl$ksHostName/KS.CFG"
     $destKs     = Join-Path $BinariesDir "KS.CFG"
 
-    Write-Host "Downloading KS.CFG from $sourceUrl → $destKs"
+    Write-Host "Downloading KS.CFG from $sourceUrl -> $destKs"
 
     try {
         Invoke-WebRequest -Uri $sourceUrl -OutFile $destKs -UseBasicParsing -ErrorAction Stop
@@ -298,7 +322,7 @@ function New-IsoInWsl {
 
     $genisoCmd = "cd $WslUserHome && genisoimage -relaxed-filenames -J -R -o `"$IsoName`" -b `"$BiosBootImage`" -c BOOT.CAT -no-emul-boot -boot-load-size 4 -boot-info-table -eltorito-alt-boot -e `"$EfiBootImage`" -no-emul-boot `"$SourcePathInWsl`""
 
-    Write-Host "Running genisoimage in WSL → $IsoName ..."
+    Write-Host "Running genisoimage in WSL -> $IsoName ..."
     Write-Host "  BIOS boot image : $BiosBootImage"
     Write-Host "  EFI  boot image : $EfiBootImage"
 
@@ -325,11 +349,11 @@ function Move-IsosToWindows {
         $dest      = Join-Path $IsoOutDir $iso
 
         if (-not (Test-Path $wslSource)) {
-            Write-Warning "Could not find $wslSource – skipping"
+            Write-Warning "Could not find $wslSource - skipping"
             continue
         }
 
-        Write-Host "Moving $iso → $IsoOutDir"
+        Write-Host "Moving $iso -> $IsoOutDir"
         Move-Item -Path $wslSource -Destination $dest -Force
     }
 }
@@ -356,7 +380,6 @@ try {
         wsl -d $WslDistro -- sudo apt-get update
         wsl -d $WslDistro -- sudo apt-get install -y genisoimage
 
-        # Verify installation
         $wslCheck = wsl -d $WslDistro -- which genisoimage 2>$null
         if (-not $wslCheck) {
             throw "Failed to install genisoimage in WSL."
@@ -364,24 +387,27 @@ try {
         Write-Host "genisoimage installed successfully." -ForegroundColor Green
     }
 
-    # Ensure BinariesDir exists
+    # Ensure folders exist
+    Ensure-Directory -Path $RootDir
+    Ensure-Directory -Path $DepotDir
     Ensure-Directory -Path $BinariesDir
+    Ensure-Directory -Path $IsoOutDir
 
-    # If BinariesDir is empty → offer to import from an existing ESXi ISO
+    # Import from ISO if Binaries is empty
     if (Test-DirectoryEmpty -Path $BinariesDir) {
-        Write-Step "BinariesDir is empty"
-        Import-FromEsxiIso -BinariesDir $BinariesDir
+        Write-Step "Binaries folder is empty - looking for installer ISO in Depot"
+        Import-FromEsxiIso -BinariesDir $BinariesDir -DepotDir $DepotDir
     }
 
-    # Locate boot images (handles different casing)
+    # Locate boot images
     $biosBoot = Find-BootFile -BinariesDir $BinariesDir -PossibleNames @("isolinux.bin", "ISOLINUX.BIN", "Isolinux.bin")
     $efiBoot  = Find-BootFile -BinariesDir $BinariesDir -PossibleNames @("efiboot.img", "EFIBOOT.IMG", "Efiboot.img")
 
     if (-not $biosBoot) {
-        throw "Could not find isolinux.bin (BIOS boot image) in $BinariesDir. Cannot create hybrid ISO."
+        throw "Could not find isolinux.bin in $BinariesDir.`nMake sure a full ESXi installer ISO was imported."
     }
     if (-not $efiBoot) {
-        throw "Could not find efiboot.img (EFI boot image) in $BinariesDir. Cannot create hybrid ISO."
+        throw "Could not find efiboot.img in $BinariesDir."
     }
 
     Write-Host "Found BIOS boot image: $biosBoot"
@@ -394,30 +420,27 @@ try {
     $Version     = $null
 
     foreach ($folder in $HostConfigDir) {
-        # Read version from boot.cfg / BOOT.CFG (only once)
+
         if (-not $Version) {
             $Version = Get-VersionFromBootCfg -BinariesDir $BinariesDir
         }
 
-        # Download KS.CFG via HTTP if MediaType is USB or CD
         if ($MediaType -in @("USB", "CD")) {
             Write-Step "Downloading KS.CFG for $folder ($MediaType)"
             Copy-KickstartFile -HostName $folder -BinariesDir $BinariesDir
         }
 
-        # Update kernelopt based on MediaType
         Write-Step "Updating kernelopt for $folder ($MediaType)"
         Update-KernelOpt -BinariesDir $BinariesDir -HostName $folder -MediaType $MediaType
 
         $isoName = "$folder-$Version.iso"
 
-        Write-Step "$folder → $isoName"
+        Write-Step "$folder -> $isoName"
         New-IsoInWsl -IsoName $isoName `
                      -SourcePathInWsl $BinariesDirInWsl `
                      -BiosBootImage $biosBoot `
                      -EfiBootImage $efiBoot
 
-        # Remove KS.CFG after the ISO has been created
         if ($MediaType -in @("USB", "CD")) {
             Remove-KickstartFile -BinariesDir $BinariesDir
         }
@@ -425,8 +448,7 @@ try {
         $createdIsos += $isoName
     }
 
-    # Move all created ISO files to Windows
-    Write-Step "Moving finished ISO files to Windows"
+    Write-Step "Moving finished ISO files"
     Move-IsosToWindows -IsoNames $createdIsos
 
     Write-Host "`nDone! ISO files are located in:" -ForegroundColor Green
