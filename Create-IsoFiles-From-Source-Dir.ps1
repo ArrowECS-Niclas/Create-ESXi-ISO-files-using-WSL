@@ -24,11 +24,11 @@ $IsoOutDir   = Join-Path $RootDir "ISO"        # Finished ISO files
 $WslDistro   = "Ubuntu"
 $WslUserHome = "/home/nibo"
 
-# Kickstart base URL (used when MediaType = http)
-$KickstartBaseUrl = "http://192.168.0.76/kickstart/"
-
 # Install media type: "http", "USB" or "CD"
 $MediaType = "http"
+
+# Kickstart base URL (used when MediaType = http)
+$KickstartBaseUrl = "http://192.168.0.76/kickstart/"
 
 # Hosts to create ISOs for
 $HostConfigDir = @("ESX01", "ESX02", "ESX03")
