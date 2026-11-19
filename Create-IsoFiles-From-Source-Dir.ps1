@@ -57,10 +57,18 @@ function Get-InstallerLayout {
     )
     $files = foreach ($relativePath in $requiredFiles) {
         $path = Join-Path $Directory $relativePath
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) {
+        $parent = Split-Path -LiteralPath $path
+        $expectedName = Split-Path -Path $path -Leaf
+        # Directory enumeration returns the on-disk casing required by genisoimage.
+        $file = if (Test-Path -LiteralPath $parent -PathType Container) {
+            Get-ChildItem -LiteralPath $parent -Filter $expectedName -File -Force |
+                Where-Object Name -EQ $expectedName |
+                Select-Object -First 1
+        }
+        if (-not $file) {
             throw "Required installer file missing: '$path'."
         }
-        Get-Item -LiteralPath $path
+        $file
     }
 
     $buildLine = Get-Content -LiteralPath $files[0].FullName |
