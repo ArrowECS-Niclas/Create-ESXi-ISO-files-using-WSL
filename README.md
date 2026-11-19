@@ -1,54 +1,42 @@
 # Create customized ESXi installer ISOs with WSL
 
-`Create-IsoFiles-From-Source-Dir.ps1` creates one bootable VMware ESXi installer ISO per host. It runs in PowerShell on Windows and uses `genisoimage` in Windows Subsystem for Linux (WSL) to build images that support BIOS and UEFI boot. Each image is configured to load a host-specific Kickstart file (`KS.CFG`) for unattended installation.
+`Create-IsoFiles-From-Source-Dir.ps1` builds one ESXi installer ISO per host. It configures Kickstart for BIOS and UEFI boot.
 
 ## Prerequisites
 
-- Windows with PowerShell 5.1 or later and a working WSL distribution.
-- `genisoimage` in the selected distribution. If it is missing, the script attempts to install it using `sudo apt-get`, which requires an APT-based distribution, sudo access, and access to its package repositories.
-- An original ESXi installer ISO or a complete set of extracted installer files. The script requires `isolinux.bin`, `efiboot.img`, and a root `boot.cfg` containing a `build=` value. Keep `efi/boot/boot.cfg` in the source tree so the script can update the UEFI boot options.
-- A web server serving each host’s `KS.CFG`. In HTTP mode, the ESXi installer needs access to that server during installation. In USB and CD modes, Windows needs access during ISO creation.
+- Windows PowerShell 5.1 or later and a WSL distribution with access to the Windows project directory.
+- `genisoimage` in that distribution. On APT-based distributions, pass `-InstallDependencies` to let the script install it with `sudo apt-get`.
+- An original ESXi installer ISO or a complete extracted installer tree containing `isolinux.bin`, `efiboot.img`, `boot.cfg` with a `build=` value, and `efi/boot/boot.cfg`.
+- A web server hosting each host's `KS.CFG`. In HTTP mode, ESXi needs access at boot. In USB and CD modes, Windows needs access during the build.
 
-## Configuration
+## Run the script
 
-Edit the variables at the top of the PowerShell script before running it.
+```powershell
+.\Create-IsoFiles-From-Source-Dir.ps1 -RootDir 'C:\ESXi' -HostName ESX01,ESX02 -MediaType HTTP -KickstartBaseUrl 'http://webserver/kickstart/'
+```
 
-| Variable | Default | Purpose |
+| Parameter | Default | Purpose |
 | --- | --- | --- |
-| `$RootDir` | `C:\ESXi` | Parent directory for the project folders. Use a drive-letter path accessible in WSL under `/mnt/<drive>`. |
-| `$DepotDir` | `$RootDir\Depot` | Folder for original VMware installer ISOs. |
-| `$BinariesDir` | `$RootDir\Binaries` | Working folder containing the extracted installer files. The script edits the boot configuration files here in place. |
-| `$IsoOutDir` | `$RootDir\ISO` | Windows destination for the finished ISOs. |
-| `$WslDistro` | `Ubuntu` | Installed WSL distribution to use. Run `wsl -l -q` to list distribution names. |
-| `$WslUserHome` | `/home/nibo` | Existing, writable Linux directory where ISOs are built before being moved to Windows. Set it to the appropriate path for your WSL user. |
-| `$MediaType` | `http` | How the installer reads Kickstart. Valid values are `http`, `USB`, and `CD`. |
-| `$KickstartBaseUrl` | `http://192.168.0.76/kickstart/` | Base URL for host-specific Kickstart files in all three modes. Include the trailing slash. |
-| `$HostConfigDir` | `@("ESX01", "ESX02", "ESX03")` | Array of host names. Each name supplies the ISO filename prefix and determines the Kickstart URL. |
+| `-RootDir` | `C:\ESXi` | Project directory. It must be accessible from Windows and WSL. |
+| `-WslDistro` | `Ubuntu` | WSL distribution to use. |
+| `-HostName` | `ESX01,ESX02,ESX03` | Unique host names used for filenames and Kickstart URLs. |
+| `-MediaType` | `HTTP` | Kickstart location. Accepts `HTTP`, `USB`, or `CD`. |
+| `-KickstartBaseUrl` | `http://192.168.0.76/kickstart/` | Base directory URL for host-specific Kickstart files. |
+| `-SourceIso` | Automatic selection | Full or relative path to a specific installer ISO. |
+| `-InstallDependencies` | Off | Allow APT to install a missing `genisoimage`. |
 
-## Kickstart files
+With `-SourceIso`, the script extracts that image into a temporary directory. Otherwise it uses a populated `Binaries` directory under the project root if present. If there are no extracted files, it selects the most recently modified `VMware-VMvisor-installer*.iso` or `VMware-ESXi*.iso` from `Depot` and extracts it for that run. Allow disk space for the extracted source, a per-host working copy, and the finished images.
 
-Serve each file at `<KickstartBaseUrl><host-directory>/KS.CFG`. The script replaces a leading `ESX` with `ESXi` when constructing the URL. For example, with a base URL of `http://webserver/kickstart/`, host `ESX01` uses `http://webserver/kickstart/ESXi01/KS.CFG`. The ISO filename still uses `ESX01`.
+## Kickstart and output
 
-The script sets `kernelopt` in `boot.cfg` and `efi/boot/boot.cfg` wherever those files are present. It replaces an existing setting or adds one if needed.
+For host `ESX01`, the script requests `<KickstartBaseUrl>/ESXi01/KS.CFG`. It replaces a leading `ESX` with `ESXi` in the URL and uses the original host name in the ISO filename.
 
-| `$MediaType` | Example `kernelopt` value | How Kickstart is loaded |
-| --- | --- | --- |
-| `http` | `kernelopt=ks=http://webserver/kickstart/ESXi01/KS.CFG` | The ESXi installer fetches the file at boot. |
-| `USB` | `kernelopt=ks=usb:/KS.CFG` | The script downloads the file and includes it at the ISO root. The installer looks for it at the root of the USB media. |
-| `CD` | `kernelopt=ks=cdrom:/KS.CFG` | The script downloads the file and includes it at the ISO root. The installer looks for it at the root of the CD-ROM media. |
+| Mode | Installer behavior |
+| --- | --- |
+| HTTP | Fetches the host's Kickstart file from its URL at boot. |
+| USB | Looks for `ks=usb:/KS.CFG`. The build includes the downloaded file at the ISO root. |
+| CD | Looks for `ks=cdrom:/KS.CFG`. The build includes the downloaded file at the ISO root. |
 
-In USB and CD modes, the script removes the downloaded `KS.CFG` from the working folder after each successful ISO build.
+The script updates the `ks=` option in both boot configurations in a per-host working copy. It preserves other kernel options and cleans up the working files after each run.
 
-## Build the ISOs
-
-1. Put a source ISO named `VMware-VMvisor-installer*.iso` or `VMware-ESXi*.iso` in `$DepotDir`. You can also populate `$BinariesDir` with already extracted installer files.
-2. Publish the per-host Kickstart files and set the configuration variables.
-3. From the script’s directory in PowerShell, run:
-
-   ```powershell
-   .\Create-IsoFiles-From-Source-Dir.ps1
-   ```
-
-If `$BinariesDir` is empty, the script selects the matching ISO in `$DepotDir` with the most recent file modification time. If it finds no match, it prompts for the full path to an ISO. It mounts the selected image, copies the installer files into `$BinariesDir`, and dismounts the image. When `$BinariesDir` already contains files, the script reuses them. To start from a different source ISO, point `$BinariesDir` at a new, empty working folder.
-
-The output filename combines the host name and the `build=` value from the root `boot.cfg`, for example `ESX01-9.1.1-0.25714478.iso`. After building the images in WSL, the script moves them to `$IsoOutDir` through `\\wsl.localhost`. Existing ISOs with the same names can be overwritten. The working boot configuration retains the settings for the last host processed.
+Finished images appear in `<RootDir>\ISO`, with names such as `ESX01-9.1.1-0.25714478.iso`. A completed build replaces an existing image of the same name. If a later host fails, previously published images remain available.
